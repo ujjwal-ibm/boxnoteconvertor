@@ -358,7 +358,7 @@ def download_image(box_file_id: str, file_name: str, workdir: Path, token: str, 
                     with open(file_path, 'wb') as f:
                         f.write(response.content)
                     
-                    logger.info(f'Successfully downloaded image: {file_name}')
+                    logger.debug(f'Successfully downloaded image: {file_name}')
                     return file_path
                     
             except requests.exceptions.RequestException as e:

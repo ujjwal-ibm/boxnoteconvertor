@@ -43,14 +43,14 @@ def main(input_path: str, dir: Optional[str], token: Optional[str],
         
         # Process files
         if input_path.is_dir():
-            logger.info(f"Processing directory: {input_path}")
+            logger.debug(f"Processing directory: {input_path}")
             converter.convert_folder(input_path)
         else:
             if not input_path.suffix == '.boxnote':
                 logger.error(f"Input file must be a .boxnote file: {input_path}")
                 return 1
                 
-            logger.info(f"Processing file: {input_path}")
+            logger.debug(f"Processing file: {input_path}")
             converter.convert_single_file(input_path, output_path)
             
         return 0
