@@ -2,7 +2,7 @@ import json
 from typing import Dict, List, Union, Optional, Any
 from pathlib import Path
 from boxtodocx.mappers import html_mapper
-import re
+import re, json
 from bs4 import BeautifulSoup
 from boxtodocx.utils.logger import get_logger
 
@@ -112,7 +112,8 @@ class BoxNoteParser:
             result = ''.join(filter(None, contents))
             result = re.sub(r'<p style="text-align: left"></p>', '', result)
             result = re.sub(r'\s+', ' ', result)
-
+            logger.debug("Complete generated HTML:")
+            logger.debug(result)
             return result
 
         except Exception as e:
@@ -174,6 +175,46 @@ class BoxNoteParser:
                     self.token,
                     self.user
                 ))
+            elif content_type == 'table':
+                # Append table with proper styling
+                contents.append('\n<table border="1" style="border-collapse: collapse; width: 100%;">\n')
+                
+                # Process each row
+                for row in content.get('content', []):
+                    if row['type'] != 'table_row':
+                        continue
+                        
+                    contents.append('  <tr>\n')
+                    
+                    # Process each cell
+                    for cell in row.get('content', []):
+                        if cell['type'] != 'table_cell':
+                            continue
+                            
+                        attrs = cell.get('attrs', {})
+                        colspan = attrs.get('colspan', 1)
+                        rowspan = attrs.get('rowspan', 1)
+                        
+                        # Build cell attributes
+                        cell_attrs = []
+                        if colspan > 1:
+                            cell_attrs.append(f'colspan="{colspan}"')
+                        if rowspan > 1:
+                            cell_attrs.append(f'rowspan="{rowspan}"')
+                        
+                        # Add cell with styling
+                        contents.append(f'    <td {" ".join(cell_attrs)} style="border: 1px solid black; padding: 8px;">')
+                        
+                        # Process cell content
+                        cell_content = cell.get('content', [])
+                        if cell_content:
+                            self.parse_content(cell_content, contents)
+                        
+                        contents.append('</td>\n')
+                        
+                    contents.append('  </tr>\n')
+                contents.append('</table>\n\n')
+                logger.debug(f"Generated table content: {''.join(contents[-50:])}")
             else:
                 # Handle other content types
                 if content_type in html_mapper.tag_open_map:

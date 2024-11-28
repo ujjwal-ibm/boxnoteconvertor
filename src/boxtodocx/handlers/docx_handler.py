@@ -8,7 +8,7 @@ import docx.table
 import re
 from html.parser import HTMLParser
 from pathlib import Path
-import os
+import os, json
 from typing import Dict, Any, Optional
 
 from boxtodocx.utils.logger import get_logger
@@ -127,58 +127,78 @@ class HtmlToDocx(HTMLParser):
             logger.warning(f"Error parsing style string: {e}")
             return {}
 
+
     def handle_starttag(self, tag, attrs):
-        """Handle opening HTML tags"""
-        if self.skip:
-            return
-
-        # Skip style tags completely
-        if tag == 'style':
-            self.skip = True
-            self.skip_tag = tag
-            return
-
         try:
             attrs_dict = dict(attrs)
+            logger.debug(f"handle_starttag: Processing tag {tag} with attrs: {attrs_dict}")
             
-            if tag == 'p':
+            # Handle headings with explicit color
+            if tag == 'span' and 'style' in attrs_dict:
+                style = self.parse_style_string(attrs_dict['style'])
+                
+                # Create new run for the span
+                self.run = self.paragraph.add_run()
+                
+                # Apply all styles from the span
+                if 'color' in style:
+                    logger.debug(f"Applying color: {style['color']}")
+                    rgb = tuple(int(style['color'].lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+                    self.run.font.color.rgb = RGBColor(*rgb)
+                    
+                if 'font-size' in style:
+                    size = int(style['font-size'].replace('px', ''))
+                    self.run.font.size = Pt(size)
+                    
+            elif tag == 'u':
+                logger.debug("Adding underline")
+                if not self.run:
+                    self.run = self.paragraph.add_run()
+                self.run.underline = True
+                
+            elif tag.startswith('h') and len(tag) == 2:
+                try:
+                    level = int(tag[1])
+                    logger.debug(f"Creating heading level {level}")
+                    self.paragraph = self.doc.add_paragraph(style=f'Heading {level}')
+                    self.paragraph.paragraph_format.space_before = Pt(12)
+                    self.paragraph.paragraph_format.space_after = Pt(12)
+                    self.run = self.paragraph.add_run()
+                    
+                    # Get color from style if present
+                    if 'style' in attrs_dict:
+                        style = self.parse_style_string(attrs_dict['style'])
+                        logger.debug(f"Heading style: {style}")
+                        if 'color' in style:
+                            rgb = tuple(int(style['color'][i:i+2], 16) for i in (1, 3, 5))
+                            self.run.font.color.rgb = RGBColor(*rgb)
+                            logger.debug(f"Applied heading color: {rgb}")
+                    
+                except ValueError as e:
+                    logger.error(f"Invalid heading: {e}")
+
+            # Improved bullet points handling
+            elif tag == 'ul':
+                logger.debug("Starting bullet list")
+                self.lists.append('ul')
+                
+            elif tag == 'li':
+                logger.debug("Processing list item")
+                if self.lists and self.lists[-1] == 'ul':
+                    self.paragraph = self.doc.add_paragraph(style='List Bullet')
+
+            elif tag == 'p':
+                logger.debug("handle_starttag: Creating paragraph")
                 self.paragraph = self.doc.add_paragraph()
                 if 'style' in attrs_dict:
                     style = self.parse_style_string(attrs_dict['style'])
+                    logger.debug(f"handle_starttag: Applying paragraph style: {style}")
                     self.apply_paragraph_style(style)
-                    
-            elif tag in ['ul', 'ol']:
-                self.current_list_type = tag
-                self.current_list_level += 1
-                
-            elif tag == 'li':
-                self.handle_list_item()
-                
-            elif tag == 'table':
-                self.current_table_content = []
-                self.in_header = False
-            elif tag == 'tr':
-                self.current_table_row = []
-            elif tag in ['td', 'th']:
-                self.in_header = tag == 'th'
-                self.current_table_cell = []
-                
-            elif tag in ['strong', 'b', 'em', 'i', 'u', 's']:
-                if not self.paragraph:
-                    self.paragraph = self.doc.add_paragraph()
-                self.run = self.paragraph.add_run()
-                self.apply_font_style(tag)
-                
-            elif tag == 'a' and 'href' in attrs_dict:
-                if not self.paragraph:
-                    self.paragraph = self.doc.add_paragraph()
-                self.handle_link(attrs_dict['href'])
-                
-            elif tag == 'img' and 'src' in attrs_dict:
-                self.handle_image(attrs_dict)
-                
+            # Rest of your handle_starttag code...
+
         except Exception as e:
-            logger.error(f"Error handling start tag {tag}: {e}")
+            logger.error(f"Error in handle_starttag: {e}")
+            logger.exception("Full traceback:")
 
     def handle_endtag(self, tag):
         """Handle closing HTML tags"""
@@ -212,20 +232,27 @@ class HtmlToDocx(HTMLParser):
 
     def handle_data(self, data):
         """Handle text content"""
-        if self.skip or not data.strip():
+        if self.skip or not data:
             return
 
         try:
+            logger.debug(f"handle_data: Processing text data: {data}")
+            
             if not self.paragraph:
+                logger.debug("handle_data: Creating new paragraph")
                 self.paragraph = self.doc.add_paragraph()
-                
+            
             if not self.run:
-                self.run = self.paragraph.add_run(data)
-            else:
-                self.run.add_text(data)
+                logger.debug("handle_data: Creating new run")
+                self.run = self.paragraph.add_run()
                 
+            logger.debug(f"handle_data: Adding text to run: {data}")
+            self.run.add_text(data)
+
         except Exception as e:
-            logger.error(f"Error handling data: {e}")
+            logger.error(f"handle_data: Error processing text: {str(e)}")
+            logger.exception("handle_data: Full traceback:")
+
 
     def parse_html_file(self, input_file: str, output_file: str = None) -> None:
         """Parse HTML file to docx with enhanced error handling"""
@@ -240,6 +267,8 @@ class HtmlToDocx(HTMLParser):
 
             # Parse HTML
             self.feed(html)
+            logger.debug("Processing HTML in docx_handler:")
+            logger.debug(str(html))
 
             # Clean up empty paragraphs
             for paragraph in self.doc.paragraphs[:]:
@@ -304,102 +333,71 @@ class HtmlToDocx(HTMLParser):
         except Exception as e:
             logger.error(f"Error handling list item: {e}")
 
-
     def apply_text_style(self, run, style_dict: dict):
         """Apply text styling with enhanced color support"""
         try:
+            logger.debug(f"apply_text_style: Processing styles: {style_dict}")
+            
             if 'color' in style_dict:
-                color = style_dict['color']
+                color = style_dict.get('color', '').strip()
+                logger.debug(f"Found color: {color}")
+                
                 if color.startswith('#'):
-                    # Convert hex to RGB
                     rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
                     run.font.color.rgb = RGBColor(*rgb)
-                    
-            if 'background-color' in style_dict:
-                color = style_dict['background-color']
-                if color.startswith('#'):
-                    rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
-                    shd = OxmlElement('w:shd')
-                    shd.set(qn('w:fill'), '{:02x}{:02x}{:02x}'.format(*rgb))
-                    run._element.rPr.append(shd)
-                    
-            if 'font-size' in style_dict:
-                size = style_dict['font-size']
-                if 'pt' in size:
-                    pt_size = float(size.replace('pt', ''))
-                    run.font.size = Pt(pt_size)
-                elif 'px' in size:
-                    px_size = float(size.replace('px', ''))
-                    run.font.size = Pt(px_size * 0.75)
+                    logger.debug(f"Applied color RGB: {rgb}")
+                else:
+                    logger.warning(f"Skipping invalid color format: {color}")
+
+            if 'font-weight' in style_dict and style_dict['font-weight'] == 'bold':
+                run.bold = True
+                logger.debug("Applied bold formatting")
+                
+            if 'text-decoration' in style_dict:
+                if style_dict['text-decoration'] == 'underline':
+                    run.underline = True
+                    logger.debug("Applied underline formatting")
+                elif style_dict['text-decoration'] == 'line-through':
+                    run.strike = True
+                    logger.debug("Applied strikethrough formatting")                    
                     
         except Exception as e:
-            logger.warning(f"Error applying text style: {e}")
-
+            logger.error(f"apply_text_style error: {e}")
+            logger.exception("Full traceback:")
+ 
+            
     def handle_table(self, table_soup) -> None:
-        """Handle table conversion with proper error handling"""
         try:
-            if table_soup is None:
-                logger.warning("Empty table found, skipping")
+            logger.debug("Processing table structure")
+            
+            rows = table_soup.find_all('tr')
+            if not rows:
                 return
 
-            rows, cols = self.get_table_dimensions(table_soup)
-            if rows == 0 or cols == 0:
-                logger.warning("Table with no dimensions found, skipping")
-                return
-
-            # Create table
-            table = self.doc.add_table(rows, cols)
-            if self.table_style:
-                try:
-                    table.style = self.table_style
-                except KeyError:
-                    logger.warning(f"Table style '{self.table_style}' not found")
+            # Create table with proper dimensions
+            table = self.doc.add_table(rows=len(rows), cols=len(rows[0].find_all(['td', 'th'])))
+            table.style = 'Table Grid'
+            table.allow_autofit = True
 
             # Process rows
-            current_row = 0
-            for row_elem in self.get_table_rows(table_soup):
-                if current_row >= rows:
-                    break
+            for i, row in enumerate(rows):
+                cells = row.find_all(['td', 'th'])
+                for j, cell in enumerate(cells):
+                    # Get text content preserving formatting
+                    cell_content = cell.get_text(strip=True)
+                    table_cell = table.cell(i, j)
+                    
+                    if cell_content:
+                        paragraph = table_cell.paragraphs[0]
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        run = paragraph.add_run(cell_content)
+                        if cell.find('strong'):
+                            run.bold = True
 
-                # Process cells
-                cells = row_elem.find_all(['th', 'td'], recursive=False)
-                current_col = 0
-
-                for cell_elem in cells:
-                    if current_col >= cols:
-                        break
-
-                    try:
-                        cell = table.cell(current_row, current_col)
-
-                        # Handle colspan and rowspan
-                        colspan = int(cell_elem.get('colspan', 1))
-                        rowspan = int(cell_elem.get('rowspan', 1))
-
-                        if colspan > 1 or rowspan > 1:
-                            cell.merge(
-                                table.cell(
-                                    current_row + rowspan - 1,
-                                    current_col + colspan - 1
-                                )
-                            )
-
-                        # Process cell content
-                        cell_html = str(cell_elem)
-                        self.add_html_to_cell(cell_html, cell)
-
-                        current_col += colspan
-
-                    except Exception as e:
-                        logger.warning(f"Error processing table cell: {e}")
-                        current_col += 1
-
-                current_row += 1
+            logger.debug(f"Created table with {len(rows)} rows")
 
         except Exception as e:
-            logger.error(f"Error handling table: {e}")
-            self.paragraph = self.doc.add_paragraph()
-
+            logger.error(f"Table creation failed: {e}")
 
     def handle_list(self, list_type: str, content):
         """Enhanced list handling with proper indentation"""
@@ -556,11 +554,35 @@ class HtmlToDocx(HTMLParser):
             self.doc = Document()
             
             # Parse and process HTML
-            self.soup = BeautifulSoup(html, 'html.parser')
-            self.tables = self.get_tables()
+            soup = BeautifulSoup(html, 'html.parser')
+            self.soup = soup
+            self.tables = soup.find_all('table')
+            # self.tables = self.get_tables()
+            tables = self.soup.find_all('table')
+            logger.debug(f"Found {len(tables)} tables in HTML")
+            for idx, table in enumerate(tables):
+                logger.debug(f"Table {idx} structure: {table.prettify()}")
             self.table_no = 0
             self.feed(str(self.soup))
+
+            # After processing the HTML content, add test table
+            logger.debug("Adding test table to document")
             
+            # Add comment for easy removal
+            self.doc.add_paragraph("# START TEST TABLE")
+            
+            test_table = self.doc.add_table(rows=3, cols=3)
+            test_table.style = 'Table Grid'
+            
+            # Add some test content
+            for i, row in enumerate(test_table.rows):
+                for j, cell in enumerate(row.cells):
+                    cell.text = f"Cell {i+1}-{j+1}"
+                    
+            self.doc.add_paragraph("# END TEST TABLE")
+            logger.debug("Test table added successfully")
+            # After processing the HTML content, add test table
+
             # Remove empty paragraphs
             for paragraph in self.doc.paragraphs:
                 if not paragraph.text and not paragraph._element.xpath('.//w:drawing'):
@@ -607,22 +629,31 @@ class HtmlToDocx(HTMLParser):
     def get_table_dimensions(self, table_soup) -> tuple[int, int]:
         """Get table dimensions with error handling"""
         try:
-            rows = self.get_table_rows(table_soup)
-            max_cols = 0
-
-            for row in rows:
-                cols = self.get_table_columns(row)
-                row_width = sum(int(col.get('colspan', 1)) for col in cols)
-                max_cols = max(max_cols, row_width)
-
-            return len(rows), max_cols
+            table_rows = table_soup.find_all('tr')
+            if not table_rows:
+                return 0, 0
+            
+            row_count = len(table_rows)
+            max_cols = max(len(row.find_all(['td', 'th'])) for row in table_rows)
+            
+            logger.debug(f"Detected table dimensions: {row_count} rows, {max_cols} columns")
+            return row_count, max_cols
 
         except Exception as e:
-            logger.warning(f"Error getting table dimensions: {e}")
+            logger.error(f"Error getting table dimensions: {e}")
             return 0, 0
+
+    def get_table_rows(self, table_soup):
+        """Get all immediate child tr elements"""
+        try:
+            return table_soup.find_all('tr', recursive=False)
+        except Exception as e:
+            logger.error(f"Error getting table rows: {e}")
+            return []
 
     def add_html_to_cell(self, html: str, cell):
         """Add HTML content to table cell with proper formatting"""
+        logger.debug(f"Adding HTML to cell: {html}")
         try:
             if not isinstance(cell, docx.table._Cell):
                 raise ValueError('Second argument must be a table cell')

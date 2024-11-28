@@ -29,8 +29,10 @@ def setup_logger(verbose: bool = False) -> None:
     handler.setFormatter(formatter)
 
     # Set log levels
-    root_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-    handler.setLevel(logging.DEBUG if verbose else logging.INFO)
+    # root_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    # handler.setLevel(logging.DEBUG if verbose else logging.INFO)
+    root_logger.setLevel(logging.DEBUG)
+    handler.setLevel(logging.DEBUG)
 
     root_logger.addHandler(handler)
 
