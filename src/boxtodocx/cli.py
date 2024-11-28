@@ -4,8 +4,8 @@ from typing import Optional
 
 import click
 
-from boxnotetodocx.converter import BoxNoteConverter
-from boxnotetodocx.utils.logger import setup_logger, get_logger
+from boxtodocx.converter import BoxNoteConverter
+from boxtodocx.utils.logger import setup_logger, get_logger
 
 logger = get_logger(__name__)
 
@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 def main(input_path: str, dir: Optional[str], token: Optional[str],
          output: Optional[str], user: Optional[str], verbose: bool) -> int:
     """
-    Convert BoxNote files to DOCX format.
+    Convert BoxNote files to docx format.
     
     INPUT_PATH can be a single .boxnote file or a directory containing multiple .boxnote files.
     """

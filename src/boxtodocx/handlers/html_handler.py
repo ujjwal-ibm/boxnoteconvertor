@@ -1,10 +1,10 @@
 import json
 from typing import Dict, List, Union, Optional, Any
 from pathlib import Path
-from boxnotetodocx.mappers import html_mapper
+from boxtodocx.mappers import html_mapper
 import re
 from bs4 import BeautifulSoup
-from boxnotetodocx.utils.logger import get_logger
+from boxtodocx.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

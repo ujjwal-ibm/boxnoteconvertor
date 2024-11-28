@@ -1,18 +1,18 @@
 import argparse
 from pathlib import Path
-from boxnotetodocx.handlers.html_handler import BoxNoteParser
-from boxnotetodocx.handlers.docx_handler import HtmlToDocx
-from boxnotetodocx.utils.logger import get_logger
+from boxtodocx.handlers.html_handler import BoxNoteParser
+from boxtodocx.handlers.docx_handler import HtmlToDocx
+from boxtodocx.utils.logger import get_logger
 import sys
 import traceback
 import uuid
 from typing import Optional
-from boxnotetodocx.utils.logger import get_logger, setup_logger
+from boxtodocx.utils.logger import get_logger, setup_logger
 
 logger = get_logger(__name__)
 
 class BoxNoteConverter:
-    """Main converter class for BoxNote to DOCX conversion."""
+    """Main converter class for BoxNote to docx conversion."""
     
     def __init__(self, workdir: Path, token: Optional[str] = None, user_id: Optional[str] = None):
         self.workdir = workdir
@@ -75,8 +75,8 @@ class BoxNoteConverter:
             with open(temp_html, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            # Convert HTML to DOCX
-            logger.info(f"Converting to DOCX: {output_docx}")
+            # Convert HTML to docx
+            logger.info(f"Converting to docx: {output_docx}")
             docx_parser = HtmlToDocx(self.workdir)
             docx_parser.table_style = 'TableGrid'
 
@@ -84,7 +84,7 @@ class BoxNoteConverter:
                 docx_parser.parse_html_file(str(temp_html), str(output_docx.with_suffix('')))
                 logger.info(f"Successfully created: {output_docx}")
             except Exception as e:
-                logger.error(f"DOCX conversion failed: {str(e)}")
+                logger.error(f"docx conversion failed: {str(e)}")
                 raise
 
         except Exception as e:
@@ -186,8 +186,8 @@ class DocxConverter:
             with open(temp_html, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            # Convert HTML to DOCX
-            logger.info(f"Converting to DOCX: {output_docx}")
+            # Convert HTML to docx
+            logger.info(f"Converting to docx: {output_docx}")
             docx_parser = HtmlToDocx(workdir)
             docx_parser.table_style = 'TableGrid'
 
@@ -195,7 +195,7 @@ class DocxConverter:
                 docx_parser.parse_html_file(str(temp_html), str(output_docx.with_suffix('')))  # Remove .docx extension
                 logger.info(f"Successfully created: {output_docx}")
             except Exception as e:
-                logger.error(f"DOCX conversion failed: {str(e)}")
+                logger.error(f"docx conversion failed: {str(e)}")
                 logger.error(traceback.format_exc())
                 raise
 
@@ -239,7 +239,7 @@ class DocxConverter:
         logger.info(f"Failed: {failed}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Convert BoxNote files to DOCX format')
+    parser = argparse.ArgumentParser(description='Convert BoxNote files to docx format')
     parser.add_argument('input', help='Input file or directory path')
     parser.add_argument('-d', '--dir', help='Work directory for temporary files')
     parser.add_argument('-t', '--token', help='Box access token')

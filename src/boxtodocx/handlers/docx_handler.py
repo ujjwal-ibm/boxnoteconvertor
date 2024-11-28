@@ -11,7 +11,7 @@ from pathlib import Path
 import os
 from typing import Dict, Any, Optional
 
-from boxnotetodocx.utils.logger import get_logger
+from boxtodocx.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -228,7 +228,7 @@ class HtmlToDocx(HTMLParser):
             logger.error(f"Error handling data: {e}")
 
     def parse_html_file(self, input_file: str, output_file: str = None) -> None:
-        """Parse HTML file to DOCX with enhanced error handling"""
+        """Parse HTML file to docx with enhanced error handling"""
         try:
             # Read HTML file
             with open(input_file, 'r', encoding='utf-8') as infile:
@@ -547,7 +547,7 @@ class HtmlToDocx(HTMLParser):
             logger.warning(f"Error handling blockquote: {e}")
 
     def parse_html_file(self, input_file: str, output_file: str = None):
-        """Parse HTML file to DOCX with enhanced error handling"""
+        """Parse HTML file to docx with enhanced error handling"""
         try:
             with open(input_file, 'r', encoding='utf-8') as infile:
                 html = infile.read()

@@ -4,7 +4,7 @@ import re
 import requests
 import base64
 from urllib.parse import unquote
-from boxnotetodocx.utils.logger import get_logger
+from boxtodocx.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
