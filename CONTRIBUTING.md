@@ -1,13 +1,13 @@
-# Contributing to BoxNote to DOCX Converter
+# Contributing to BoxNote to docx Converter
 
-Thank you for your interest in contributing to BoxNote to DOCX Converter! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to BoxNote to docx Converter! This document provides guidelines and instructions for contributing.
 
 ## Development Setup
 
 1. Clone the repository:
    ```bash
-   git clone git@github.com:ujjwal-ibm/boxnoteconvertor.git
-   cd boxnoteconvertor/boxnotetodocx
+   git clone git@github.com:ujjwal-ibm/boxtodocx.git
+   cd boxtodocx
    ```
 
 2. Create a virtual environment:
@@ -47,7 +47,7 @@ pytest
 
 For test coverage:
 ```bash
-pytest --cov=boxnotetodocx
+pytest --cov=boxtodocx
 ```
 
 ## Pull Request Process

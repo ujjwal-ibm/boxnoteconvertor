@@ -1,5 +1,5 @@
 """Mapper package for BoxNote conversion."""
-from boxnotetodocx.mappers.html_mapper import *
+from boxtodocx.mappers.html_mapper import *
 
 __all__ = [
     'get_tag_open',

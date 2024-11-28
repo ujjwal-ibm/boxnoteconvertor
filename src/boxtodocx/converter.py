@@ -1,18 +1,18 @@
 import argparse
 from pathlib import Path
-from boxnotetodocx.handlers.html_handler import BoxNoteParser
-from boxnotetodocx.handlers.docx_handler import HtmlToDocx
-from boxnotetodocx.utils.logger import get_logger
+from boxtodocx.handlers.html_handler import BoxNoteParser
+from boxtodocx.handlers.docx_handler import HtmlToDocx
+from boxtodocx.utils.logger import get_logger
 import sys
 import traceback
 import uuid
 from typing import Optional
-from boxnotetodocx.utils.logger import get_logger, setup_logger
+from boxtodocx.utils.logger import get_logger, setup_logger
 
 logger = get_logger(__name__)
 
 class BoxNoteConverter:
-    """Main converter class for BoxNote to DOCX conversion."""
+    """Main converter class for BoxNote to docx conversion."""
     
     def __init__(self, workdir: Path, token: Optional[str] = None, user_id: Optional[str] = None):
         self.workdir = workdir
@@ -52,7 +52,7 @@ class BoxNoteConverter:
             temp_html = self.get_temp_html_path()
 
             # Read and parse content
-            logger.info(f"Reading input file: {input_file}")
+            logger.debug(f"Reading input file: {input_file}")
             with open(input_file, 'r', encoding='utf-8') as f:
                 content = f.read()
 
@@ -66,17 +66,17 @@ class BoxNoteConverter:
                 output_docx = output_docx.parent / f'{output_stem}.docx'
 
             # Parse BoxNote to HTML
-            logger.info("Converting BoxNote to HTML")
+            logger.debug("Converting BoxNote to HTML")
             parser = BoxNoteParser()
             html_content = parser.parse(content, clean_name, self.workdir, self.token, self.user_id)
 
             # Write temporary HTML
-            logger.info(f"Writing temporary HTML: {temp_html}")
+            logger.debug(f"Writing temporary HTML: {temp_html}")
             with open(temp_html, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            # Convert HTML to DOCX
-            logger.info(f"Converting to DOCX: {output_docx}")
+            # Convert HTML to docx
+            logger.debug(f"Converting to docx: {output_docx}")
             docx_parser = HtmlToDocx(self.workdir)
             docx_parser.table_style = 'TableGrid'
 
@@ -84,7 +84,7 @@ class BoxNoteConverter:
                 docx_parser.parse_html_file(str(temp_html), str(output_docx.with_suffix('')))
                 logger.info(f"Successfully created: {output_docx}")
             except Exception as e:
-                logger.error(f"DOCX conversion failed: {str(e)}")
+                logger.error(f"docx conversion failed: {str(e)}")
                 raise
 
         except Exception as e:
@@ -103,25 +103,25 @@ class BoxNoteConverter:
         successful = 0
         failed = 0
 
-        logger.info(f"Found {total_files} BoxNote files in {input_path}")
+        logger.debug(f"Found {total_files} BoxNote files in {input_path}")
 
         for boxnote_file in boxnote_files:
             try:
-                logger.info(f"Processing: {boxnote_file.name}")
+                logger.debug(f"Processing: {boxnote_file.name}")
                 output_docx = None  # Let convert_single_file handle the output path
                 self.convert_single_file(boxnote_file, output_docx)
                 successful += 1
-                logger.info(f"Successfully converted: {boxnote_file.name}")
+                logger.debug(f"Successfully converted: {boxnote_file.name}")
             except Exception as e:
                 failed += 1
                 logger.error(f"Failed to convert {boxnote_file.name}: {str(e)}")
                 continue
 
         # Print summary
-        logger.info("\nConversion Summary:")
-        logger.info(f"Total files: {total_files}")
-        logger.info(f"Successfully converted: {successful}")
-        logger.info(f"Failed: {failed}")
+        logger.debug("\nConversion Summary:")
+        logger.debug(f"Total files: {total_files}")
+        logger.debug(f"Successfully converted: {successful}")
+        logger.debug(f"Failed: {failed}")
 
 
 
@@ -163,7 +163,7 @@ class DocxConverter:
             temp_html = self.get_temp_html_path(workdir)
 
             # Read and parse content
-            logger.info(f"Reading input file: {input_file}")
+            logger.debug(f"Reading input file: {input_file}")
             with open(input_file, 'r', encoding='utf-8') as f:
                 content = f.read()
 
@@ -178,16 +178,16 @@ class DocxConverter:
 
             # Parse BoxNote to HTML
             from html_parser import parse
-            logger.info("Converting BoxNote to HTML")
+            logger.debug("Converting BoxNote to HTML")
             html_content = parse(content, clean_name, workdir, token, user_id)
 
             # Write temporary HTML
-            logger.info(f"Writing temporary HTML: {temp_html}")
+            logger.debug(f"Writing temporary HTML: {temp_html}")
             with open(temp_html, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            # Convert HTML to DOCX
-            logger.info(f"Converting to DOCX: {output_docx}")
+            # Convert HTML to docx
+            logger.debug(f"Converting to docx: {output_docx}")
             docx_parser = HtmlToDocx(workdir)
             docx_parser.table_style = 'TableGrid'
 
@@ -195,7 +195,7 @@ class DocxConverter:
                 docx_parser.parse_html_file(str(temp_html), str(output_docx.with_suffix('')))  # Remove .docx extension
                 logger.info(f"Successfully created: {output_docx}")
             except Exception as e:
-                logger.error(f"DOCX conversion failed: {str(e)}")
+                logger.error(f"docx conversion failed: {str(e)}")
                 logger.error(traceback.format_exc())
                 raise
 
@@ -218,28 +218,28 @@ class DocxConverter:
         successful = 0
         failed = 0
 
-        logger.info(f"Found {total_files} BoxNote files in {input_path}")
+        logger.debug(f"Found {total_files} BoxNote files in {input_path}")
 
         for boxnote_file in boxnote_files:
             try:
-                logger.info(f"Processing: {boxnote_file.name}")
+                logger.debug(f"Processing: {boxnote_file.name}")
                 output_docx = None  # Let convert_single_file handle the output path
                 self.convert_single_file(token, workdir, boxnote_file, output_docx, user_id)
                 successful += 1
-                logger.info(f"Successfully converted: {boxnote_file.name}")
+                logger.debug(f"Successfully converted: {boxnote_file.name}")
             except Exception as e:
                 failed += 1
                 logger.error(f"Failed to convert {boxnote_file.name}: {str(e)}")
                 continue
 
         # Print summary
-        logger.info("\nConversion Summary:")
-        logger.info(f"Total files: {total_files}")
-        logger.info(f"Successfully converted: {successful}")
-        logger.info(f"Failed: {failed}")
+        logger.debug("\nConversion Summary:")
+        logger.debug(f"Total files: {total_files}")
+        logger.debug(f"Successfully converted: {successful}")
+        logger.debug(f"Failed: {failed}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Convert BoxNote files to DOCX format')
+    parser = argparse.ArgumentParser(description='Convert BoxNote files to docx format')
     parser.add_argument('input', help='Input file or directory path')
     parser.add_argument('-d', '--dir', help='Work directory for temporary files')
     parser.add_argument('-t', '--token', help='Box access token')

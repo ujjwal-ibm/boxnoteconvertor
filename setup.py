@@ -7,17 +7,17 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
-    name="boxnotetodocx",
+    name="boxtodocx",
     version="1.0.0",
     author="Ujjwal Kumar",
     author_email="ujjwal.kumar1@ibm.com",
-    description="Convert Box Notes to Microsoft Word (DOCX) documents",
+    description="Convert Box Notes to Microsoft Word (docx) documents",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/ujjwal-ibm/boxnoteconvertor",
+    url="https://github.com/ujjwal-ibm/boxtodocx",
     project_urls={
-        "Bug Tracker": "https://github.com/ujjwal-ibm/boxnoteconvertor/issues",
-        "Documentation": "https://github.com/ujjwal-ibm/boxnoteconvertor",
+        "Bug Tracker": "https://github.com/ujjwal-ibm/boxtodocx/issues",
+        "Documentation": "https://github.com/ujjwal-ibm/boxtodocx",
     },
     classifiers=[
         "Development Status :: 5 - Production/Stable",
@@ -38,7 +38,7 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "boxnotetodocx=boxnotetodocx.cli:main",
+            "boxtodocx=boxtodocx.cli:main",
         ],
     },
     include_package_data=True,

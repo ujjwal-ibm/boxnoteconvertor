@@ -1,39 +1,62 @@
-# boxnoteconvertor
-A tool to convert boxnotes to docx(for now)
+# BoxNote to docx Converter
 
+A Python command-line tool to convert Box Notes to Microsoft Word (docx) documents with preservation of formatting, tables, and images.
 
-### **Getting Started with `boxtodocx`**
+## Features
 
-set up the core tool—`boxtodocx`. Follow these steps:
+- Convert single BoxNote files to docx
+- Batch convert entire directories of BoxNote files
+- Preserve formatting, tables, and images
+- Support for Box API authentication
+- Simple command-line interface
 
-#### **1. Clone the Repository**
+## Installation
+
 ```bash
-git clone https://github.com/ujjwal-ibm/boxnoteconvertor.git
-```
 
-#### **2. Navigate to the Tool Directory**
-```bash
-cd boxnoteconvertor/boxtodocx
-```
-
-#### **3. Install the Tool**
-Install the package using Python’s package manager:
-```bash
 pip3 install .
 ```
 
-#### **4. Verify Installation**
-You can now use the command-line tool:
+## Usage
+
+### Basic Usage
+
+Convert a single file:
 ```bash
-boxnotetodocx --help
+boxtodocx example.boxnote
 ```
 
-#### **5. Conversion Examples**
-- **Single File Conversion**:
-  ```bash
-  boxnotetodocx example.boxnote
-  ```
-- **Batch Conversion for a Directory**:
-  ```bash
-  boxnotetodocx /path/to/directory
-  ```
+Convert all files in a directory:
+```bash
+boxtodocx /path/to/directory
+```
+
+### Advanced Options
+
+```bash
+boxtodocx --help
+
+Options:
+  -d, --dir TEXT     Work directory for temporary files
+  -t, --token TEXT   Box access token
+  -o, --output TEXT  Output file name (only for single file conversion)
+  -u, --user TEXT    Box user id
+  -v, --verbose      Enable verbose logging
+  --help            Show this message and exit
+```
+
+## Authentication
+
+To use Box API features (like image downloading), you need to provide a Box access token:
+
+```bash
+boxtodocx input.boxnote -t "your_box_token" -u "your_user_id"
+```
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
