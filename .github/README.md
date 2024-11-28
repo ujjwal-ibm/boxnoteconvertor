@@ -1,3 +1,0 @@
-- Contains GitHub-specific configurations
-- workflows/ holds GitHub Actions configurations
-- ci.yml defines automated testing, linting, and deployment
