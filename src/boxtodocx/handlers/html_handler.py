@@ -1,206 +1,99 @@
-import json
-from typing import Dict, List, Union, Optional, Any
-from pathlib import Path
-from boxtodocx.mappers import html_mapper
-import re
-from bs4 import BeautifulSoup
-from boxtodocx.utils.logger import get_logger
+from boxtodocx.utils.logger import setup_logger
+from yattag import Doc
+import logging
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from ..utils.logger import setup_logger
+import os
+import time
+import requests
+from typing import Optional
 
-logger = get_logger(__name__)
-
-class BoxNoteParser:
+class HTMLHandler:
     def __init__(self):
-        self.token = None
-        self.user = None
-        self.workdir = None
-        self.title = None
-        self.content_stack = []
-        self.list_stack = []
+        self.doc, self.tag, self.text = Doc().tagtext()
+        self.browser = None
+        self.cookies = None
+        self.is_logged_in = False
+        self.pending_images = []
+        self.logger = setup_logger()
 
-    def try_parse_json(self, content: str) -> Dict:
-        """Try different approaches to parse the BoxNote content"""
+    def convert_to_html(self, content_list, dest_dir):
         try:
-            # First try: direct JSON parse
-            return json.loads(content)
-        except json.JSONDecodeError:
-            try:
-                # Second try: Clean the content and try again
-                cleaned_content = re.sub(r'[\x00-\x1F\x7F]', '', content)
-                return json.loads(cleaned_content)
-            except json.JSONDecodeError:
+            with self.tag('html'):
+                with self.tag('body'):
+                    for elm in content_list:
+                        self._process_element(elm, dest_dir=dest_dir)
+            
+            if self.pending_images:
+                self._download_images()
+            
+            return self.doc.getvalue()
+        finally:
+            self.cleanup()
+
+    def _handle_browser(self, initial_url):
+        if not self.browser:
+            for name, driver in [('chrome', webdriver.Chrome), ('firefox', webdriver.Firefox), ('safari', webdriver.Safari)]:
                 try:
-                    # Third try: Try to find JSON content within the string
-                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                    if json_match:
-                        return json.loads(json_match.group(0))
-                except:
-                    pass
-                
-                # If all attempts fail, try to parse as plain text
-                return {
-                    "doc": {
-                        "content": {
-                            "type": "paragraph",
-                            "content": [{
-                                "type": "text",
-                                "text": content
-                            }]
-                        }
-                    }
-                }
+                    options = self._get_browser_options(name)
+                    self.browser = driver(options=options)
+                    self.logger.info(f"Using {name} browser")
+                    break
+                except Exception:
+                    continue
 
-    def validate_boxnote_structure(self, boxnote: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate and fix BoxNote structure if needed"""
-        if not isinstance(boxnote, dict):
-            logger.warning("BoxNote content is not a dictionary, wrapping it")
-            return {
-                "doc": {
-                    "content": boxnote
-                }
-            }
+            if not self.browser:
+                raise RuntimeError("No supported browser found")
 
-        if "doc" not in boxnote:
-            logger.warning("No 'doc' field found, wrapping content")
-            return {
-                "doc": {
-                    "content": boxnote
-                }
-            }
+            self.browser.get(initial_url)
+            self.logger.info("Please log in to Box. Browser will be minimized after login.")
+            input("Press Enter after logging in...")
+            self.browser.minimize_window()
+            self.cookies = self.browser.get_cookies()
+            self.is_logged_in = True
 
-        if "content" not in boxnote.get("doc", {}):
-            logger.warning("No 'content' field found in doc, creating empty content")
-            boxnote["doc"]["content"] = {}
+    def _process_element(self, el, dest_dir):
+        if 'content' in el:
+            self._handle_content_element(el, dest_dir)
+        elif 'text' in el:
+            self._handle_text_element(el)
 
-        return boxnote
+    def _handle_content_element(self, el, dest_dir):
+        if el['type'] == 'image':
+            self._handle_image(el, dest_dir)
+        elif el['type'] == 'table':
+            self._handle_table(el)
+        else:
+            self._handle_other_content(el, dest_dir)
 
-    def parse(self, boxnote_content: Union[str, bytes, bytearray], title: str = None, 
-             workdir: Path = None, access_token: str = None, user_id: str = None) -> str:
-        try:
-            self.token = access_token
-            self.user = user_id
-            self.workdir = workdir
-            self.title = title
-
-            # Convert bytes to string if needed
-            if isinstance(boxnote_content, (bytes, bytearray)):
-                boxnote_content = boxnote_content.decode('utf-8', errors='replace')
-
-            # Parse the content
-            boxnote = self.try_parse_json(boxnote_content)
+    def _handle_image(self, el, dest_dir):
+        if 'attrs' in el and 'src' in el['attrs']:
+            if not os.path.exists(dest_dir):
+                os.makedirs(dest_dir)
             
-            # Validate and fix structure
-            boxnote = self.validate_boxnote_structure(boxnote)
-
-            # Initialize HTML document
-            contents = [
-                '<!DOCTYPE html>',
-                '<html>',
-                '<head>',
-                '<meta charset="UTF-8">',
-                f'<title>{title}</title>',
-                '</head>',
-                '<body>'
-            ]
-
-            # Parse the content
-            self.parse_content(boxnote['doc']['content'], contents)
-
-            # Finalize HTML document
-            contents.extend(['</body>', '</html>'])
-
-            # Clean up empty paragraphs and normalize spacing
-            result = ''.join(filter(None, contents))
-            result = re.sub(r'<p style="text-align: left"></p>', '', result)
-            result = re.sub(r'\s+', ' ', result)
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in main parsing: {str(e)}")
-            logger.error(f"Stack trace:\n{traceback.format_exc()}")
-            return self.create_error_html(str(e))
-
-        
-    def parse_content(self, content: Union[Dict, List], contents: List[str], 
-                     ignore_paragraph: bool = False):
-        """Parse BoxNote content with enhanced style handling"""
-        if not content:
-            return
-
-        try:
-            # Handle list content
-            if isinstance(content, list):
-                for item in content:
-                    self.parse_content(item, contents, ignore_paragraph)
-                return
-
-            # Handle dictionary content
-            if not isinstance(content, dict):
-                return
-
-            content_type = content.get('type', '')
+            image_path = os.path.join(dest_dir, f"image_{hash(el['attrs']['src'])}.png")
+            self.pending_images.append((el['attrs']['src'], image_path))
             
-            # Special handling for text to preserve formatting
-            if content_type == 'text':
-                text_content = content.get('text', '')
-                # Skip if it looks like a style tag
-                if not text_content.strip().startswith('<style'):
-                    marks = content.get('marks', [])
-                    contents.append(html_mapper.handle_text_marks(marks, text_content))
-            
-            # Handle other content types...
-            elif content_type == 'paragraph' and not ignore_paragraph:
-                alignment = 'left'
-                for mark in content.get('marks', []):
-                    if mark.get('type') == 'alignment':
-                        alignment = mark.get('attrs', {}).get('alignment', 'left')
-                contents.append(html_mapper.get_tag_open('paragraph', alignment=alignment))
-                self.parse_content(content.get('content', []), contents)
-                contents.append(html_mapper.get_tag_close('paragraph'))
-                
-            elif content_type in ['list_item', 'check_list_item']:
-                args = {}
-                if content_type == 'check_list_item':
-                    checked = content.get('attrs', {}).get('checked', False)
-                    args = {'checked': 'checked' if checked else '', 'x': 'X' if checked else '  '}
-                contents.append(html_mapper.get_tag_open(content_type, **args))
-                self.parse_content(content.get('content', []), contents, True)
-                contents.append(html_mapper.get_tag_close(content_type))
-            elif content_type == 'image':
-                contents.append(html_mapper.handle_image(
-                    content.get('attrs', {}),
-                    self.title,
-                    self.workdir,
-                    self.token,
-                    self.user
-                ))
-            else:
-                # Handle other content types
-                if content_type in html_mapper.tag_open_map:
-                    contents.append(html_mapper.get_tag_open(
-                        content_type,
-                        **content.get('attrs', {})
-                    ))
-                    self.parse_content(content.get('content', []), contents)
-                    contents.append(html_mapper.get_tag_close(content_type))
+            if not self.is_logged_in:
+                self._handle_browser(el['attrs']['src'])
 
-        except Exception as e:
-            logger.warning(f"Error parsing content type '{content_type}': {str(e)}")
-            # Continue processing other content
+    def _download_images(self):
+        session = requests.Session()
+        for cookie in self.cookies:
+            session.cookies.set(cookie['name'], cookie['value'])
 
-    def create_error_html(self, error_message: str) -> str:
-        """Create basic HTML for error cases"""
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Error</title></head>
-        <body>
-        <p>Error converting BoxNote: {error_message}</p>
-        </body>
-        </html>
-        """
+        for img_url, dest_path in self.pending_images:
+            try:
+                response = session.get(img_url)
+                if response.status_code == 200:
+                    with open(dest_path, 'wb') as f:
+                        f.write(response.content)
+                    self.logger.info(f"Downloaded: {dest_path}")
+            except Exception as e:
+                self.logger.error(f"Failed to download {img_url}: {str(e)}")
 
-def parse(*args, **kwargs):
-    """Convenience function to parse BoxNote content"""
-    parser = BoxNoteParser()
-    return parser.parse(*args, **kwargs)
+    def cleanup(self):
+        if self.browser:
+            self.browser.quit()
+            self.logger.info("Browser session closed")

@@ -1,65 +1,37 @@
-import sys
-from pathlib import Path
-from typing import Optional
-
 import click
-
-from boxtodocx.converter import BoxNoteConverter
-from boxtodocx.utils.logger import setup_logger, get_logger
+import os
+from pathlib import Path
+from .converter import BoxNoteConverter
+from .utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 @click.command()
-@click.version_option()  # This will use __version__ from __init__.py
+@click.version_option()
 @click.argument('input_path', type=click.Path(exists=True))
 @click.option('-d', '--dir', help='Work directory for temporary files')
 @click.option('-t', '--token', help='Box access token')
-@click.option('-o', '--output', help='Output file name (only for single file conversion)')
+@click.option('-o', '--output', help='Output file name')
 @click.option('-u', '--user', help='Box user id')
 @click.option('-v', '--verbose', is_flag=True, help='Enable verbose logging')
-def main(input_path: str, dir: Optional[str], token: Optional[str],
-         output: Optional[str], user: Optional[str], verbose: bool) -> int:
-    """
-    Convert BoxNote files to docx format.
-    
-    INPUT_PATH can be a single .boxnote file or a directory containing multiple .boxnote files.
-    """
+def main(input_path, dir, token, output, user, verbose):
     try:
-        # Setup logging
-        setup_logger(verbose)
-        
-        # Initialize converter
-        workdir = Path(dir) if dir else Path.cwd() / '.temp'
-        workdir.mkdir(parents=True, exist_ok=True)
-        
-        converter = BoxNoteConverter(
-            workdir=workdir,
-            token=token,
-            user_id=user
-        )
-        
+        converter = BoxNoteConverter()
         input_path = Path(input_path)
-        output_path = Path(output) if output else None
         
-        # Process files
-        if input_path.is_dir():
-            logger.debug(f"Processing directory: {input_path}")
-            converter.convert_folder(input_path)
+        if input_path.is_file():
+            _convert_file(converter, input_path, output or dir)
         else:
-            if not input_path.suffix == '.boxnote':
-                logger.error(f"Input file must be a .boxnote file: {input_path}")
-                return 1
-                
-            logger.debug(f"Processing file: {input_path}")
-            converter.convert_single_file(input_path, output_path)
+            _convert_directory(converter, input_path)
             
-        return 0
-        
     except Exception as e:
-        logger.error(f"Conversion failed: {str(e)}")
-        if verbose:
-            logger.exception("Detailed error information:")
-        return 1
+        logger.error(f"Error: {str(e)}")
+        raise click.Abort()
 
-if __name__ == '__main__':
-    sys.exit(main())
+def _convert_file(converter, file_path, output_dir=None):
+    output_dir = output_dir or file_path.parent
+    converter.convert(str(file_path), str(output_dir))
+
+def _convert_directory(converter, dir_path):
+    for file in dir_path.glob('**/*.boxnote'):
+        _convert_file(converter, file)
