@@ -161,3 +161,8 @@ cython_debug/
 
 path/*
 *.docx
+.pypirc
+/output
+*.boxnote
+/TestDir
+.DS_Store
