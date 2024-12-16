@@ -45,6 +45,7 @@ class BrowserManager:
             
         for browser_name in SUPPORTED_BROWSERS:
             try:
+                headless=True
                 options = self._get_browser_options(browser_name, headless)
                 driver_class = self._get_driver_class(browser_name)
                 self.driver = driver_class(options=options)
