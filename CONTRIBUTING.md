@@ -1,6 +1,6 @@
-# Contributing to BoxNote to docx Converter
+# Contributing to BoxToDocx
 
-Thank you for your interest in contributing to BoxNote to docx Converter! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to BoxToDocx! This document provides guidelines for contributing.
 
 ## Development Setup
 
@@ -10,13 +10,13 @@ Thank you for your interest in contributing to BoxNote to docx Converter! This d
    cd boxtodocx
    ```
 
-2. Create a virtual environment:
+2. Create and activate virtual environment:
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. Install development dependencies:
+3. Install dependencies:
    ```bash
    pip3 install -r requirements-dev.txt
    ```
@@ -26,39 +26,32 @@ Thank you for your interest in contributing to BoxNote to docx Converter! This d
    pip3 install -e .
    ```
 
-
 ## Core Dependencies
 
-| Library | Version |
-|---------|---------|
-| python-docx | >=0.8.11 |
-| beautifulsoup4 | >=4.9.3 |
-| click | >=8.0.0 |
-| requests | >=2.25.1 |
-| colorlog | >=6.7.0 |
+- python-docx>=0.8.11
+- beautifulsoup4>=4.9.3
+- click>=8.0.0
+- requests>=2.25.1
+- colorlog>=6.7.0
+- selenium>=4.0.0
+- Pillow>=10.0.0
+- yattag>=1.16.0
 
+## Code Style
 
-## Testing
-
-Run tests with pytest:
-```bash
-pytest
-```
-
-For test coverage:
-```bash
-pytest --cov=boxtodocx
-```
+- Use Black for code formatting
+- Follow PEP 8 guidelines
+- Add type hints to all new code
+- Write docstrings for modules, classes, and functions
 
 ## Pull Request Process
 
 1. Create a new branch for your feature/fix
 2. Write tests for new functionality
 3. Update documentation as needed
-4. Ensure all tests pass and code style checks pass
+4. Ensure all tests pass
 5. Submit a pull request with a clear description of changes
 
+## License
 
-## Code of Conduct
-
-Please note that this project is released with a Contributor Code of Conduct. By participating in this project you agree to abide by its terms.
+By contributing, you agree that your contributions will be licensed under its MIT License.

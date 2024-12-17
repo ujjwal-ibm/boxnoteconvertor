@@ -1,679 +1,285 @@
+"""Handler for converting HTML content to DOCX format."""
+from typing import Dict, Optional, Union
+from pathlib import Path
+import re
 from bs4 import BeautifulSoup
 from docx import Document
-from docx.shared import RGBColor, Pt, Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-import docx.table
-import re
-from html.parser import HTMLParser
-from pathlib import Path
-import os
-from typing import Dict, Any, Optional
+from docx.text.paragraph import Paragraph
+from docx.text.run import Run
+from PIL import Image
+from ..utils.logger import setup_logger
+from ..utils.constants import (
+    DEFAULT_TABLE_STYLE,
+    DEFAULT_IMAGE_WIDTH,
+    DEFAULT_FONT_SIZE,
+    DEFAULT_FONT_NAME
+)
 
-from boxtodocx.utils.logger import get_logger
+logger = setup_logger(__name__)
 
-logger = get_logger(__name__)
-
-# Configuration constants
-INDENT = 0.25
-LIST_INDENT = 0.5
-BLOCKQUOTE_INDENT = 0.5
-MAX_INDENT = 5.5
-DEFAULT_TABLE_STYLE = 'TableGrid'
-DEFAULT_PARAGRAPH_STYLE = None
-
-# Style mappings
-font_styles = {
-    'b': 'bold',
-    'strong': 'bold',
-    'em': 'italic',
-    'i': 'italic',
-    'u': 'underline',
-    's': 'strike',
-    'sup': 'superscript',
-    'sub': 'subscript',
-    'th': 'bold',
-    'code': 'bold',
-}
-
-font_names = {
-    'code': 'Courier New',
-    'pre': 'Courier New',
-}
-styles = {
-    'LIST_BULLET': 'List Bullet',
-    'LIST_NUMBER': 'List Number',
-}
-
-
-def delete_paragraph(paragraph):
-    """Safely delete a paragraph"""
-    try:
-        p = paragraph._element
-        parent = p.getparent()
-        if parent is not None:
-            parent.remove(p)
-        paragraph._p = paragraph._element = None
-    except Exception as e:
-        logger.error(f"Error deleting paragraph: {e}")
-
-class HtmlToDocx(HTMLParser):
-    def __init__(self, workdir=None):
-        super().__init__()
-        self.workdir = workdir
-        self.table_row_selectors = [
-            'table > tr',
-            'table > thead > tr',
-            'table > tbody > tr',
-            'table > tfoot > tr'
-        ]
-        self.table_style = 'TableGrid'
-        self.paragraph_style = None
-        self.reset_state()
-
-    def reset_state(self):
-        """Reset parser state"""
-        self.tags = {
-            'span': [],
-            'list': [],
-            'blockquote': [],
-            'table': []
-        }
-        self.doc = None
-        self.paragraph = None
-        self.run = None
-        self.skip = False
-        self.skip_tag = None
-        self.instances_to_skip = 0
-        self.blockquote = False
-        self.style = False
-        self.current_table = None
-        self.in_header = False
-        self.current_tag_content = []  # To store content between tags
-        self.current_list_type = None
-        self.current_list_level = 0
-        self.current_table_content = []
-        self.current_table_row = None
-        self.current_table_cell = None
-        HTMLParser.reset(self)
+class DOCXHandler:
+    """Handles conversion of HTML content to DOCX format."""
+    
+    def __init__(self) -> None:
+        """Initialize DOCX handler."""
+        self.document = Document()
+        self.output_dir: Optional[Path] = None
+        self.assets_dir: Optional[Path] = None
+        self._setup_document()
+    
+    def _setup_document(self) -> None:
+        """Set up default document styles."""
+        style = self.document.styles['Normal']
+        font = style.font
+        font.name = DEFAULT_FONT_NAME
+        font.size = Pt(DEFAULT_FONT_SIZE)
+    
+    def convert_html_to_docx(self, html_content: str, output_path: Union[str, Path], assets_dir: Union[str, Path] = None) -> Path:
+        """
+        Convert HTML content to DOCX format.
         
+        Args:
+            html_content: HTML string to convert
+            output_path: Path for output DOCX file
+            assets_dir: Directory containing images and other assets
 
-    def parse_style_string(self, style_string: str) -> dict:
-        """Parse HTML style string to dictionary"""
-        try:
-            if not style_string:
-                return {}
+        Returns:
+            Path to created DOCX file
             
-            styles = {}
-            for style in style_string.split(';'):
-                if ':' not in style:
-                    continue
-                    
-                key, value = style.split(':', 1)
-                key = key.strip().lower()
-                value = value.strip()
+        Raises:
+            ValueError: If HTML content is invalid
+        """
+        try:
+            output_path = Path(output_path)
+            self.assets_dir = Path(assets_dir) if assets_dir else output_path.parent
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            if not soup.body:
+                raise ValueError("Invalid HTML: no body tag found")
                 
-                if 'rgb' in value:
-                    rgb = re.findall(r'\d+', value)
-                    if len(rgb) == 3:
-                        value = '#{:02x}{:02x}{:02x}'.format(*map(int, rgb))
-                        
-                styles[key] = value
-                
-            return styles
+            self._process_elements(soup.body)
+            
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            self.document.save(str(output_path))
+            
+            logger.info(f"Created DOCX file: {output_path}")
+            return output_path
             
         except Exception as e:
-            logger.warning(f"Error parsing style string: {e}")
-            return {}
-
-    def handle_starttag(self, tag, attrs):
-        """Handle opening HTML tags"""
-        if self.skip:
-            return
-
-        # Skip style tags completely
-        if tag == 'style':
-            self.skip = True
-            self.skip_tag = tag
-            return
-
-        try:
-            attrs_dict = dict(attrs)
-            
-            if tag == 'p':
-                self.paragraph = self.doc.add_paragraph()
-                if 'style' in attrs_dict:
-                    style = self.parse_style_string(attrs_dict['style'])
-                    self.apply_paragraph_style(style)
-                    
-            elif tag in ['ul', 'ol']:
-                self.current_list_type = tag
-                self.current_list_level += 1
-                
-            elif tag == 'li':
-                self.handle_list_item()
-                
-            elif tag == 'table':
-                self.current_table_content = []
-                self.in_header = False
-            elif tag == 'tr':
-                self.current_table_row = []
-            elif tag in ['td', 'th']:
-                self.in_header = tag == 'th'
-                self.current_table_cell = []
-                
-            elif tag in ['strong', 'b', 'em', 'i', 'u', 's']:
-                if not self.paragraph:
-                    self.paragraph = self.doc.add_paragraph()
-                self.run = self.paragraph.add_run()
-                self.apply_font_style(tag)
-                
-            elif tag == 'a' and 'href' in attrs_dict:
-                if not self.paragraph:
-                    self.paragraph = self.doc.add_paragraph()
-                self.handle_link(attrs_dict['href'])
-                
-            elif tag == 'img' and 'src' in attrs_dict:
-                self.handle_image(attrs_dict)
-                
-        except Exception as e:
-            logger.error(f"Error handling start tag {tag}: {e}")
-
-    def handle_endtag(self, tag):
-        """Handle closing HTML tags"""
-        if self.skip:
-            if tag == self.skip_tag:
-                self.skip = False
-                self.skip_tag = None
-            return
-
-        try:
-            if tag in ['ul', 'ol']:
-                self.current_list_level -= 1
-                if self.current_list_level == 0:
-                    self.current_list_type = None
-                    
-            elif tag == 'table':
-                self.process_table()
-                self.current_table_content = []
-            elif tag == 'tr':
-                if self.current_table_row:
-                    self.current_table_content.append(self.current_table_row)
-                self.current_table_row = None
-            elif tag in ['td', 'th']:
-                if self.current_table_cell and self.current_table_row is not None:
-                    cell_content = ''.join(self.current_table_cell)
-                    self.current_table_row.append((cell_content, self.in_header))
-                self.current_table_cell = None
-                
-        except Exception as e:
-            logger.error(f"Error handling end tag {tag}: {e}")
-
-    def handle_data(self, data):
-        """Handle text content"""
-        if self.skip or not data.strip():
-            return
-
-        try:
-            if not self.paragraph:
-                self.paragraph = self.doc.add_paragraph()
-                
-            if not self.run:
-                self.run = self.paragraph.add_run(data)
-            else:
-                self.run.add_text(data)
-                
-        except Exception as e:
-            logger.error(f"Error handling data: {e}")
-
-    def parse_html_file(self, input_file: str, output_file: str = None) -> None:
-        """Parse HTML file to docx with enhanced error handling"""
-        try:
-            # Read HTML file
-            with open(input_file, 'r', encoding='utf-8') as infile:
-                html = infile.read()
-
-            # Initialize document and state
-            self.reset_state()
-            self.doc = Document()
-
-            # Parse HTML
-            self.feed(html)
-
-            # Clean up empty paragraphs
-            for paragraph in self.doc.paragraphs[:]:
-                if not paragraph.text and not paragraph._element.xpath('.//w:drawing'):
-                    self.delete_paragraph(paragraph)
-
-            # Save document
-            if not output_file:
-                path, filename = os.path.split(input_file)
-                output_file = f'{path}/new_docx_file_{filename}'
-
-            # Ensure no double extension
-            output_file = output_file.replace('.docx', '')
-            self.doc.save(f'{output_file}.docx')
-
-        except Exception as e:
-            logger.error(f"Error parsing HTML file: {e}")
+            logger.error(f"DOCX conversion failed: {str(e)}")
             raise
-
-
-    def apply_paragraph_style(self, style: dict):
-        """Apply style to paragraph"""
-        try:
-            if 'text-align' in style:
-                align = style['text-align']
-                if align == 'center':
-                    self.paragraph.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                elif align == 'right':
-                    self.paragraph.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                elif align == 'justify':
-                    self.paragraph.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                    
-            if 'margin-left' in style:
-                margin = style['margin-left']
-                value = float(re.findall(r'[\d.]+', margin)[0])
-                if 'px' in margin:
-                    value = value / 96  # Convert pixels to inches
-                elif 'pt' in margin:
-                    value = value / 72  # Convert points to inches
-                self.paragraph.paragraph_format.left_indent = Inches(min(value, MAX_INDENT))
+    
+    def _process_elements(self, parent: BeautifulSoup) -> None:
+        """Process HTML elements recursively."""
+        for element in parent.children:
+            if not hasattr(element, 'name'):
+                continue
                 
-        except Exception as e:
-            logger.error(f"Error applying paragraph style: {e}")
-
-    def apply_font_style(self, tag: str):
-        """Apply font style to run"""
-        try:
-            if tag in font_styles:
-                setattr(self.run.font, font_styles[tag], True)
-            if tag in font_names:
-                self.run.font.name = font_names[tag]
-        except Exception as e:
-            logger.error(f"Error applying font style: {e}")
-
-    def handle_list_item(self):
-        """Handle list item creation"""
-        try:
-            style = styles['LIST_BULLET'] if self.current_list_type == 'ul' else styles['LIST_NUMBER']
-            self.paragraph = self.doc.add_paragraph(style=style)
-            self.paragraph.paragraph_format.left_indent = Inches(min(self.current_list_level * LIST_INDENT, MAX_INDENT))
-            self.run = None
-        except Exception as e:
-            logger.error(f"Error handling list item: {e}")
-
-
-    def apply_text_style(self, run, style_dict: dict):
-        """Apply text styling with enhanced color support"""
-        try:
-            if 'color' in style_dict:
-                color = style_dict['color']
-                if color.startswith('#'):
-                    # Convert hex to RGB
-                    rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
-                    run.font.color.rgb = RGBColor(*rgb)
-                    
-            if 'background-color' in style_dict:
-                color = style_dict['background-color']
-                if color.startswith('#'):
-                    rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
-                    shd = OxmlElement('w:shd')
-                    shd.set(qn('w:fill'), '{:02x}{:02x}{:02x}'.format(*rgb))
-                    run._element.rPr.append(shd)
-                    
-            if 'font-size' in style_dict:
-                size = style_dict['font-size']
-                if 'pt' in size:
-                    pt_size = float(size.replace('pt', ''))
-                    run.font.size = Pt(pt_size)
-                elif 'px' in size:
-                    px_size = float(size.replace('px', ''))
-                    run.font.size = Pt(px_size * 0.75)
-                    
-        except Exception as e:
-            logger.warning(f"Error applying text style: {e}")
-
-    def handle_table(self, table_soup) -> None:
-        """Handle table conversion with proper error handling"""
-        try:
-            if table_soup is None:
-                logger.warning("Empty table found, skipping")
-                return
-
-            rows, cols = self.get_table_dimensions(table_soup)
-            if rows == 0 or cols == 0:
-                logger.warning("Table with no dimensions found, skipping")
-                return
-
-            # Create table
-            table = self.doc.add_table(rows, cols)
-            if self.table_style:
-                try:
-                    table.style = self.table_style
-                except KeyError:
-                    logger.warning(f"Table style '{self.table_style}' not found")
-
-            # Process rows
-            current_row = 0
-            for row_elem in self.get_table_rows(table_soup):
-                if current_row >= rows:
-                    break
-
-                # Process cells
-                cells = row_elem.find_all(['th', 'td'], recursive=False)
-                current_col = 0
-
-                for cell_elem in cells:
-                    if current_col >= cols:
-                        break
-
-                    try:
-                        cell = table.cell(current_row, current_col)
-
-                        # Handle colspan and rowspan
-                        colspan = int(cell_elem.get('colspan', 1))
-                        rowspan = int(cell_elem.get('rowspan', 1))
-
-                        if colspan > 1 or rowspan > 1:
-                            cell.merge(
-                                table.cell(
-                                    current_row + rowspan - 1,
-                                    current_col + colspan - 1
-                                )
-                            )
-
-                        # Process cell content
-                        cell_html = str(cell_elem)
-                        self.add_html_to_cell(cell_html, cell)
-
-                        current_col += colspan
-
-                    except Exception as e:
-                        logger.warning(f"Error processing table cell: {e}")
-                        current_col += 1
-
-                current_row += 1
-
-        except Exception as e:
-            logger.error(f"Error handling table: {e}")
-            self.paragraph = self.doc.add_paragraph()
-
-
-    def handle_list(self, list_type: str, content):
-        """Enhanced list handling with proper indentation"""
-        try:
-            self.tags['list'].append(list_type)
-            list_depth = len(self.tags['list'])
-            
-            if list_type == 'ol':
-                style = 'List Number'
+            # Add logging to track element processing
+            if element.name:
+                logger.debug(f"Processing element: {element.name}")  # Add this line
+                
+            handler = self._element_handlers.get(element.name)
+            if handler:
+                handler(self, element)
+                if element.name == 'img':  # Add this line
+                    logger.info(f"Processed image element: {element}")  # Add this line
             else:
-                style = 'List Bullet'
+                logger.debug(f"Unhandled element type: {element.name}")
                 
-            self.paragraph = self.doc.add_paragraph(style=style)
-            self.paragraph.paragraph_format.left_indent = Inches(min(list_depth * LIST_INDENT, MAX_INDENT))
-            self.paragraph.paragraph_format.line_spacing = 1
+    def _handle_paragraph(self, element: BeautifulSoup) -> None:
+        """Handle paragraph element."""
+        p = self.document.add_paragraph()
+        self._apply_styles(element, p)
+        self._process_inline_elements(element, p)
+    
+    def _handle_heading(self, element: BeautifulSoup) -> None:
+        """Handle heading element."""
+        level = int(element.name[1])  # h1 -> 1, h2 -> 2, etc.
+        self.document.add_heading(element.get_text(), level=level)
+    
+    def _handle_list(self, element: BeautifulSoup, ordered: bool = False) -> None:
+        """Handle list element."""
+        style = 'List Number' if ordered else 'List Bullet'
+        for item in element.find_all('li', recursive=False):
+            p = self.document.add_paragraph(style=style)
+            self._process_inline_elements(item, p)
+    
+    def _handle_table(self, element: BeautifulSoup) -> None:
+        """Handle table element."""
+        rows = element.find_all('tr', recursive=False)
+        if not rows:
+            return
             
-            # Process list content
-            self.process_content(content)
-            
-            self.tags['list'].pop()
-            
-        except Exception as e:
-            logger.warning(f"Error handling list: {e}")
-
-    def handle_image(self, img_elem):
-        """Enhanced image handling with size support"""
+        cols = max(len(row.find_all(['td', 'th'], recursive=False)) for row in rows)
+        table = self.document.add_table(rows=len(rows), cols=cols)
+        table.style = DEFAULT_TABLE_STYLE
+        
+        for i, row in enumerate(rows):
+            cells = row.find_all(['td', 'th'], recursive=False)
+            for j, cell in enumerate(cells):
+                table_cell = table.cell(i, j)
+                self._process_inline_elements(cell, table_cell.paragraphs[0])
+    
+    def _handle_image(self, element: BeautifulSoup) -> None:
+        """Handle image element."""
         try:
-            src = img_elem.get('src', '')
+            logger.info("Image handler called")  # Add this line
+            src = element.get('src')
+            logger.info(f"Image src: {src}")  # Add this line
+            
             if not src:
+                logger.warning("No src attribute found in image element")
                 return
-                
-            image_path = self.workdir / Path(src) if self.workdir else Path(src)
+
+            img_path = self.assets_dir / src
+            logger.info(f"Looking for image at: {img_path}")  # Add this line
             
-            if not image_path.exists():
-                logger.warning(f"Image not found: {image_path}")
-                return
-                
-            width = img_elem.get('width')
-            height = img_elem.get('height')
-            
-            if width and height:
-                self.doc.add_picture(str(image_path), width=Inches(float(width)/96), height=Inches(float(height)/96))
+            if img_path.exists():
+                logger.info(f"Found image file at: {img_path}")  # Add this line
+                # Add image to document
+                self.document.add_picture(str(img_path), width=Inches(6))
+                self.document.add_paragraph()  # Add spacing after image
+                logger.info("Successfully added image to document")  # Add this line
             else:
-                self.doc.add_picture(str(image_path))
-                
+                logger.error(f"Image file not found: {img_path}")
+
         except Exception as e:
-            logger.warning(f"Error handling image: {e}")
-
-    def handle_link(self, href: str, text: str):
-        """Enhanced link handling with better formatting"""
-        try:
-            if not href or not text:
-                return
+            logger.error(f"Error in image handling: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())  # Add full traceback
+    
+    def _process_inline_elements(
+        self,
+        element: BeautifulSoup,
+        paragraph: Paragraph
+    ) -> None:
+        """Process inline elements within a paragraph."""
+        for child in element.children:
+            if not hasattr(child, 'name') or child.name is None:
+                # Handle pure text nodes
+                if str(child).strip():  # Only add non-empty text
+                    run = paragraph.add_run(str(child))
+                continue
+            
+            # Add this block to handle images inside paragraphs
+            if child.name == 'img':
+                logger.info("Found image in paragraph")
+                self._handle_image(child)
+                continue
                 
-            # Create the hyperlink element
-            rel_id = self.paragraph.part.relate_to(
-                href,
-                docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK,
-                is_external=True
-            )
-
+            # Handle other element nodes
+            if child.name == 'a':
+                self._add_hyperlink(paragraph, child.get('href', '#'), child.get_text())
+            elif child.name in ['strong', 'b']:
+                run = paragraph.add_run(child.get_text())
+                run.bold = True
+            elif child.name in ['em', 'i']:
+                run = paragraph.add_run(child.get_text())
+                run.italic = True
+            elif child.name == 'u':
+                run = paragraph.add_run(child.get_text())
+                run.underline = True
+            elif child.name == 'br':
+                paragraph.add_run().add_break()
+            else:
+                run = paragraph.add_run(child.get_text())
+            
+            # Only apply styles to element nodes
+            if child.name:
+                self._apply_styles(child, run if 'run' in locals() else None)
+    
+    def _add_hyperlink(self, paragraph: Paragraph, url: str, text: str) -> None:
+        """Add hyperlink to paragraph with proper formatting."""
+        try:
+            part = paragraph.part
+            r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
+            
+            # Create hyperlink element
             hyperlink = OxmlElement('w:hyperlink')
-            hyperlink.set(qn('r:id'), rel_id)
-
-            # Create the text run
-            run = self.paragraph.add_run()
+            hyperlink.set(qn('r:id'), r_id)
+            
+            # Create run element
+            run = OxmlElement('w:r')
+            
+            # Add style to run
             rPr = OxmlElement('w:rPr')
-
-            # Add color (blue)
+            
+            # Add color
             color = OxmlElement('w:color')
-            color.set(qn('w:val'), '0000EE')
+            color.set(qn('w:val'), '0000FF')  # Blue color
             rPr.append(color)
-
+            
             # Add underline
             underline = OxmlElement('w:u')
             underline.set(qn('w:val'), 'single')
             rPr.append(underline)
-
-            run._r.append(rPr)
-            run._r.text = text
-
-            hyperlink.append(run._r)
-            self.paragraph._p.append(hyperlink)
-
-        except Exception as e:
-            logger.warning(f"Error handling link: {e}")
-            # Fallback to plain text
-            self.paragraph.add_run(text)
-
-    def handle_code_block(self, content: str):
-        """Enhanced code block handling with proper formatting"""
-        try:
-            self.paragraph = self.doc.add_paragraph()
-            run = self.paragraph.add_run(content)
-            run.font.name = 'Courier New'
-            run.font.size = Pt(10)
             
-            # Add gray background
-            shd = OxmlElement('w:shd')
-            shd.set(qn('w:fill'), 'F0F0F0')
-            run._element.rPr.append(shd)
+            run.append(rPr)
             
-            # Add border
-            pPr = self.paragraph._p.get_or_add_pPr()
-            pBdr = OxmlElement('w:pBdr')
+            # Add text element
+            t = OxmlElement('w:t')
+            t.text = text
+            run.append(t)
             
-            borders = ['top', 'left', 'bottom', 'right']
-            for border in borders:
-                borderElement = OxmlElement(f'w:{border}')
-                borderElement.set(qn('w:val'), 'single')
-                borderElement.set(qn('w:sz'), '4')
-                borderElement.set(qn('w:space'), '0')
-                borderElement.set(qn('w:color'), 'auto')
-                pBdr.append(borderElement)
-                
-            pPr.append(pBdr)
+            hyperlink.append(run)
+            paragraph._p.append(hyperlink)
+            
+            logger.debug(f"Added hyperlink: {text} -> {url}")
             
         except Exception as e:
-            logger.warning(f"Error handling code block: {e}")
-
-    def handle_blockquote(self, content):
-        """Enhanced blockquote handling with proper styling"""
-        try:
-            self.blockquote = True
-            self.paragraph = self.doc.add_paragraph()
-            self.paragraph.paragraph_format.left_indent = Inches(BLOCKQUOTE_INDENT)
-            self.paragraph.paragraph_format.right_indent = Inches(BLOCKQUOTE_INDENT)
-            self.paragraph.paragraph_format.line_spacing = 1
+            logger.error(f"Error adding hyperlink: {str(e)}")
+            # Fallback to plain text if hyperlink fails
+            paragraph.add_run(text)
+    
+    def _apply_styles(
+        self,
+        element: BeautifulSoup,
+        target: Union[Paragraph, Run]
+    ) -> None:
+        """Apply HTML styles to paragraph or run."""
+        # Only process elements with 'style' attribute
+        style = element.get('style')
+        if not style or not isinstance(style, str):
+            return
+        
+        for declaration in style.split(';'):
+            if ':' not in declaration:
+                continue
             
-            # Add left border
-            pPr = self.paragraph._p.get_or_add_pPr()
-            pBdr = OxmlElement('w:pBdr')
-            left = OxmlElement('w:left')
-            left.set(qn('w:val'), 'single')
-            left.set(qn('w:sz'), '24')
-            left.set(qn('w:space'), '0')
-            left.set(qn('w:color'), 'CCCCCC')
-            pBdr.append(left)
-            pPr.append(pBdr)
+            prop, value = declaration.split(':')
+            prop = prop.strip().lower()
+            value = value.strip().lower()
             
-            self.process_content(content)
-            self.blockquote = False
-            
-        except Exception as e:
-            logger.warning(f"Error handling blockquote: {e}")
-
-    def parse_html_file(self, input_file: str, output_file: str = None):
-        """Parse HTML file to docx with enhanced error handling"""
-        try:
-            with open(input_file, 'r', encoding='utf-8') as infile:
-                html = infile.read()
-                
-            self.reset_state()
-            self.doc = Document()
-            
-            # Parse and process HTML
-            self.soup = BeautifulSoup(html, 'html.parser')
-            self.tables = self.get_tables()
-            self.table_no = 0
-            self.feed(str(self.soup))
-            
-            # Remove empty paragraphs
-            for paragraph in self.doc.paragraphs:
-                if not paragraph.text and not paragraph._element.xpath('.//w:drawing'):
-                    self.delete_paragraph(paragraph)
-                    
-            # Save document
-            if not output_file:
-                path, filename = os.path.split(input_file)
-                output_file = f'{path}/new_docx_file_{filename}'
-                
-            self.doc.save(f'{output_file}.docx')
-            
-        except Exception as e:
-            logger.error(f"Error parsing HTML file: {e}")
-            raise
-
-    def delete_paragraph(self, paragraph):
-        """Safely delete a paragraph"""
-        try:
-            p = paragraph._element
-            parent = p.getparent()
-            if parent is not None:
-                parent.remove(p)
-            paragraph._p = paragraph._element = None
-        except Exception as e:
-            logger.warning(f"Error deleting paragraph: {e}")
-
-    def get_tables(self):
-        """Get all tables excluding nested ones"""
-        try:
-            all_tables = self.soup.find_all('table')
-            top_level_tables = []
-            
-            for table in all_tables:
-                if not table.find_parent('table'):
-                    top_level_tables.append(table)
-                    
-            return top_level_tables
-            
-        except Exception as e:
-            logger.warning(f"Error getting tables: {e}")
-            return []
-
-    def get_table_dimensions(self, table_soup) -> tuple[int, int]:
-        """Get table dimensions with error handling"""
-        try:
-            rows = self.get_table_rows(table_soup)
-            max_cols = 0
-
-            for row in rows:
-                cols = self.get_table_columns(row)
-                row_width = sum(int(col.get('colspan', 1)) for col in cols)
-                max_cols = max(max_cols, row_width)
-
-            return len(rows), max_cols
-
-        except Exception as e:
-            logger.warning(f"Error getting table dimensions: {e}")
-            return 0, 0
-
-    def add_html_to_cell(self, html: str, cell):
-        """Add HTML content to table cell with proper formatting"""
-        try:
-            if not isinstance(cell, docx.table._Cell):
-                raise ValueError('Second argument must be a table cell')
-                
-            # Remove default paragraph if empty
-            if cell.paragraphs and not cell.paragraphs[0].text:
-                self.delete_paragraph(cell.paragraphs[0])
-                
-            self.doc = cell
-            soup = BeautifulSoup(html, 'html.parser')
-            self.feed(str(soup))
-            
-            # Ensure cell has at least one paragraph
-            if not cell.paragraphs:
-                cell.add_paragraph()
-                
-        except Exception as e:
-            logger.error(f"Error adding HTML to cell: {e}")
-            if not cell.paragraphs:
-                cell.add_paragraph()
-
-    def process_table(self):
-        """Process collected table content"""
-        try:
-            if not self.current_table_content:
-                return
-
-            # Calculate dimensions
-            rows = len(self.current_table_content)
-            cols = max(len(row) for row in self.current_table_content) if rows > 0 else 0
-
-            if rows == 0 or cols == 0:
-                return
-
-            # Create table
-            table = self.doc.add_table(rows, cols)
-            if self.table_style:
-                try:
-                    table.style = self.table_style
-                except KeyError:
-                    logger.warning(f"Table style '{self.table_style}' not found")
-
-            # Fill table
-            for row_idx, row in enumerate(self.current_table_content):
-                for col_idx, (content, is_header) in enumerate(row):
-                    if col_idx < cols:  # Ensure we don't exceed table dimensions
-                        cell = table.cell(row_idx, col_idx)
-                        cell.text = content
-                        if is_header:
-                            run = cell.paragraphs[0].runs[0]
-                            run.bold = True
-
-        except Exception as e:
-            logger.error(f"Error processing table: {e}")
+            if prop == 'color' and isinstance(target, Run):
+                if m := re.match(r'^#?([0-9a-f]{6})$', value):
+                    hex_color = m.group(1)
+                    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                    target.font.color.rgb = RGBColor(r, g, b)
+            elif prop == 'text-align' and isinstance(target, Paragraph):
+                alignments = {
+                    'left': WD_ALIGN_PARAGRAPH.LEFT,
+                    'center': WD_ALIGN_PARAGRAPH.CENTER,
+                    'right': WD_ALIGN_PARAGRAPH.RIGHT,
+                    'justify': WD_ALIGN_PARAGRAPH.JUSTIFY
+                }
+                if value in alignments:
+                    target.alignment = alignments[value]
+    
+    _element_handlers = {
+        'p': _handle_paragraph,
+        'h1': _handle_heading,
+        'h2': _handle_heading,
+        'h3': _handle_heading,
+        'h4': _handle_heading,
+        'h5': _handle_heading,
+        'h6': _handle_heading,
+        'ul': lambda self, e: self._handle_list(e, False),
+        'ol': lambda self, e: self._handle_list(e, True),
+        'table': _handle_table,
+        'img': _handle_image
+    }
